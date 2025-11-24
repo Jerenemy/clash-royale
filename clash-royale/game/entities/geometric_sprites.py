@@ -1013,6 +1013,10 @@ class GeometricSpriteRenderer:
             return self.cache[cache_key]
             
         if sprite_type in self.sprites:
+            # Limit cache size BEFORE adding new item
+            if len(self.cache) > 2000:
+                self.cache.clear()
+
             surface = self.sprites[sprite_type].render(team, animation_phase, direction)
             # Convert alpha to ensure proper transparency and performance
             try:
@@ -1021,10 +1025,6 @@ class GeometricSpriteRenderer:
                 # Fallback if no display initialized (e.g. tests)
                 self.cache[cache_key] = surface.copy()
             
-            # Limit cache size
-            if len(self.cache) > 2000: # Increased cache size for 360 views
-                self.cache.clear()
-                
             return self.cache[cache_key]
         return None
 
