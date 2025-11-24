@@ -102,16 +102,52 @@ class BroadcastSender:
         if self.sock:
             self.sock.close()
             
+    def _get_local_ip(self):
+        try:
+            # Connect to a public DNS server to determine the most appropriate local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except Exception:
+            return "127.0.0.1"
+
     def _broadcast_loop(self):
         message = f"CLASH_ROYALE_SERVER:{self.tcp_port}".encode('utf-8')
+        
+        # Try to determine the broadcast address dynamically
+        # Default to <broadcast> (255.255.255.255)
+        broadcast_addrs = ['<broadcast>']
+        
+        try:
+            local_ip = self._get_local_ip()
+            if local_ip != "127.0.0.1":
+                # Assuming /24 subnet for simplicity (common for home/hotspots)
+                # This is a heuristic: replace last octet with 255
+                parts = local_ip.split('.')
+                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                broadcast_addrs.append(subnet_broadcast)
+                print(f"[Broadcast] Local IP: {local_ip}, Target Broadcast: {subnet_broadcast}")
+        except Exception as e:
+            print(f"[Broadcast] Error determining subnet: {e}")
+
         while self.running:
-            try:
-                self.sock.sendto(message, ('<broadcast>', self.broadcast_port))
-                time.sleep(2)  # Broadcast every 2 seconds
-            except Exception as e:
-                if self.running:
-                    print(f"[Broadcast] Error: {e}")
-                time.sleep(5)
+            sent = False
+            for addr in broadcast_addrs:
+                try:
+                    self.sock.sendto(message, (addr, self.broadcast_port))
+                    sent = True
+                except Exception as e:
+                    # Don't spam errors for every attempt, but log if all fail
+                    pass
+            
+            if not sent and self.running:
+                 # If we couldn't send to any, log the last error or generic
+                 # print(f"[Broadcast] Failed to send broadcast")
+                 pass
+                 
+            time.sleep(1)  # Broadcast every 1 second
 
 
 class MatchmakingServer:

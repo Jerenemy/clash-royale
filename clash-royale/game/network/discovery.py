@@ -6,7 +6,7 @@ class ServerDiscovery:
     """
     Discovers game servers on the local network via UDP broadcast
     """
-    def __init__(self, broadcast_port=5557, timeout=2.0):
+    def __init__(self, broadcast_port=5557, timeout=3.0):
         self.broadcast_port = broadcast_port
         self.timeout = timeout
         self.found_server = None

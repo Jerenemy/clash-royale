@@ -44,7 +44,7 @@ RARITY_EPIC = (200, 0, 255)        # Purple
 RARITY_LEGENDARY = (0, 255, 255)   # Cyan/Rainbow
 
 # Game Constants
-ELIXIR_REGEN_RATE = 0.5  # Seconds per elixir
+ELIXIR_REGEN_RATE = 2  # Seconds per elixir
 MAX_ELIXIR = 10
 PUSH_INTENSITY = 0.1 # 0.0 to 1.0, controls how fast units are pushed
 PUSH_ALIGNMENT_THRESHOLD = -0.95 # Dot product threshold for centered collision (approx 18 degrees)

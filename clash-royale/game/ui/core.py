@@ -1,4 +1,5 @@
 import pygame
+import sys
 from game.settings import *
 
 class UIElement:
@@ -138,6 +139,35 @@ class TextInput(UIElement):
                 pass
             elif event.key == pygame.K_BACKSPACE:
                 self.text = self.text[:-1]
+            elif event.key == pygame.K_v and (event.mod & pygame.KMOD_META or event.mod & pygame.KMOD_CTRL):
+                # Paste from clipboard
+                text_to_paste = ""
+                try:
+                    # Try pygame.scrap first
+                    if not pygame.scrap.get_init():
+                        pygame.scrap.init()
+                    
+                    content = pygame.scrap.get(pygame.SCRAP_TEXT)
+                    if content:
+                        if isinstance(content, bytes):
+                            text_to_paste = content.decode('utf-8').strip('\x00')
+                        else:
+                            text_to_paste = content
+                except Exception as e:
+                    print(f"pygame.scrap error: {e}")
+                
+                # Fallback for macOS if pygame.scrap failed or returned empty
+                if not text_to_paste and sys.platform == 'darwin':
+                    try:
+                        import subprocess
+                        text_to_paste = subprocess.check_output(['pbpaste']).decode('utf-8')
+                    except Exception as e:
+                        print(f"pbpaste error: {e}")
+                
+                if text_to_paste:
+                    # Filter for printable characters
+                    filtered = "".join([c for c in text_to_paste if c.isprintable()])
+                    self.text += filtered
             else:
                 # Filter for printable characters
                 if len(event.unicode) > 0 and event.unicode.isprintable():
