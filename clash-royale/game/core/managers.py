@@ -473,12 +473,22 @@ class BattleManager:
         # Sort by network_id to ensure consistent order across clients and for symmetry tests
         sorted_sprites = sorted(self.all_sprites.sprites(), key=lambda s: str(getattr(s, 'network_id', '') or id(s)))
         
-        # Phase 1: Think (Targeting/Logic)
+        # Phase 0: Prepare (Reset accumulators)
+        for sprite in sorted_sprites:
+            if hasattr(sprite, 'prepare_update'):
+                sprite.prepare_update()
+                
+        # Phase 1: Think (Targeting/Logic/Physics Calc)
         for sprite in sorted_sprites:
             if hasattr(sprite, 'think'):
                 sprite.think(dt)
                 
-        # Phase 2: Update (Movement/Physics)
+        # Phase 2: Apply (Movement/Damage/Death)
+        for sprite in sorted_sprites:
+            if hasattr(sprite, 'apply_pending_changes'):
+                sprite.apply_pending_changes()
+                
+        # Phase 3: Update (Animation/State)
         for sprite in sorted_sprites:
             sprite.update(dt)
         

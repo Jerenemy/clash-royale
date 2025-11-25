@@ -39,6 +39,36 @@ class Entity(pygame.sprite.Sprite):
         self.hitbox_type = "circle" # Default
         self.radius = 15 # Default radius
         
+        # Buffering for simultaneous updates
+        self.movement_accumulator = pygame.math.Vector2(0, 0)
+        self.pending_damage = 0
+        self.nudged = False # Current frame nudge (will be active next frame)
+        self.was_nudged = False # Previous frame nudge (active this frame)
+        
+    def prepare_update(self):
+        """Reset accumulators for the new frame"""
+        self.movement_accumulator.xy = 0, 0
+        self.pending_damage = 0
+        self.was_nudged = self.nudged
+        self.nudged = False
+        
+    def apply_pending_changes(self):
+        """Apply buffered changes"""
+        # Apply movement
+        if self.movement_accumulator.length_squared() > 0:
+            self.pos += self.movement_accumulator
+            self.rect.center = self.pos
+            
+        # Apply damage
+        if self.pending_damage > 0:
+            self.health -= self.pending_damage
+            if self.health <= 0:
+                self.on_death()
+                
+    def on_death(self):
+        """Handle death (override in subclasses)"""
+        self.kill()
+        
     def get_closest_point(self, point):
         """Get the closest point on this entity's hitbox to the given point"""
         if self.hitbox_type == "circle":
@@ -162,9 +192,7 @@ class Entity(pygame.sprite.Sprite):
             pygame.draw.rect(surface, GREEN, (pos[0], pos[1] - 10, fill, height))
 
     def take_damage(self, amount):
-        self.health -= amount
-        if self.health <= 0:
-            self.kill()
+        self.pending_damage += amount
 
 class Projectile(pygame.sprite.Sprite):
     def __init__(self, game, x, y, target, damage, team, projectile_type="basic"):
@@ -440,14 +468,16 @@ class Tower(Entity):
         if self.pending_attack:
             self.attack()
 
-    def take_damage(self, amount):
-        super().take_damage(amount)
-        if self.health <= 0:
-            particle_system.create_rubble(self.pos.x, self.pos.y)
-            assets.play_sound("tower_destroy")
+    def on_death(self):
+        super().on_death()
+        particle_system.create_rubble(self.pos.x, self.pos.y)
+        assets.play_sound("tower_destroy")
             
         if self.type == "king" and not self.active:
             self.active = True
+
+    # Remove take_damage override as it is now handled by Entity and on_death
+    # def take_damage(self, amount): ...
 
     def find_target(self):
         closest_dist = self.range + 0.001 # Epsilon
@@ -543,8 +573,8 @@ class Tower(Entity):
         surface.blit(hp_shadow, (text_x + 1, text_y + 1))
         surface.blit(hp_text, (text_x, text_y))
 
-    def take_damage(self, amount):
-        super().take_damage(amount)
+    def on_death(self):
+        super().on_death()
         if self.type == "king" and not self.active:
             self.active = True
 
@@ -655,7 +685,7 @@ class Unit(Entity):
         elif self.pos.distance_to(self.target.pos) > self.sight_range: # Target moved out of chase range
              should_retarget = True
              self.locked_target = False # Reset lock
-        elif self.nudged: # We were pushed/nudged, so re-evaluate target
+        elif self.was_nudged: # We were pushed/nudged (in previous frame), so re-evaluate target
              should_retarget = True
              self.locked_target = False # Reset lock
         
@@ -686,9 +716,18 @@ class Unit(Entity):
             dist = self.get_edge_distance(self.target)
             if dist <= self.range + 0.001: # Add epsilon
                 if self.last_attack_time >= self.attack_cooldown:
-                    self.pending_attack = True
+                    self.attack()
+                    self.last_attack_time = 0
+                    self.locked_target = True # LOCK ON after attacking!
             else:
-                self.pending_move, self.pending_pushes = self.calculate_movement(dt)
+                move_vec, pushes = self.calculate_movement(dt)
+                self.movement_accumulator += move_vec
+                
+                # Apply pushes to others' accumulators
+                for unit, push_vector in pushes:
+                    if unit.alive():
+                        unit.movement_accumulator += push_vector
+                        unit.nudged = True # Will be active next frame
         else:
             # Move towards enemy king tower if no target
             if self.team == "player":
@@ -699,10 +738,10 @@ class Unit(Entity):
             direction = target_pos - self.pos
             if direction.length() > 0:
                 direction = direction.normalize()
-            self.pending_move = direction * self.speed * dt
+            self.movement_accumulator += direction * self.speed * dt
 
     def update(self, dt):
-        """Phase 2: Movement and State Update"""
+        """Phase 3: Animation and State Update"""
         self.update_animation(dt)
         self.update_sprite() # Update sprite based on animation and direction
         if self.state == "deploying":
@@ -715,27 +754,32 @@ class Unit(Entity):
         self.last_attack_time += dt
         self.is_moving = False # Reset moving state
         
-        # Execute Pending Actions
-        if self.pending_attack:
-            self.attack()
-            self.last_attack_time = 0
-            self.locked_target = True # LOCK ON after attacking!
+        # Check if we moved (using accumulator from previous phase? No, accum is cleared)
+        # We need to know if we moved to set is_moving.
+        # But accum is cleared in prepare_update.
+        # We can check if pos changed? Or just use a flag set in apply_pending_changes?
+        # Let's assume apply_pending_changes sets is_moving if accum > 0?
+        # Or just check if we had pending move in think?
+        # Actually, apply_pending_changes is called BEFORE update.
+        # So we can check if pos changed.
+        # But simpler: check if movement_accumulator was > 0.
+        # But it's cleared.
+        # Let's add `was_moving` flag in Entity?
+        # Or just calculate facing direction in think/apply.
         
-        # Apply Pushes to OTHERS
-        for unit, push_vector in self.pending_pushes:
-            if unit.alive():
-                unit.pos += push_vector
-                unit.rect.center = unit.pos
-                unit.nudged = True
-        
-        if self.pending_move.length_squared() > 0:
-            self.pos += self.pending_move
-            self.rect.center = self.pos
-            self.is_moving = True
+        # Let's update facing direction in apply_pending_changes?
+        # Or here, if we track last_move_vec.
+        pass # Logic moved to think/apply
             
-            # Update facing direction based on movement
-            if self.pending_move.length() > 0:
-                self.update_facing_direction(self.pending_move.normalize())
+    def apply_pending_changes(self):
+        """Override to handle facing direction"""
+        if self.movement_accumulator.length_squared() > 0:
+            self.is_moving = True
+            self.update_facing_direction(self.movement_accumulator.normalize())
+        else:
+            self.is_moving = False
+            
+        super().apply_pending_changes()
 
     def update_facing_direction(self, direction_vector):
         if direction_vector.length() > 0:
@@ -929,6 +973,10 @@ class Unit(Entity):
                                 normal = pygame.math.Vector2(1, 0)
                             else:
                                 normal = pygame.math.Vector2(-1, 0)
+                                
+                            # Mirror for enemy team to ensure symmetric spreading
+                            if self.team == "enemy":
+                                normal.x *= -1
                         else:
                             normal = self.pos - unit.pos
                             if normal.length() > 0:
@@ -1008,6 +1056,10 @@ class Unit(Entity):
                                 diff = pygame.math.Vector2(1, 0)
                             else:
                                 diff = pygame.math.Vector2(-1, 0)
+                                
+                            # Mirror for enemy team to ensure symmetric spreading
+                            if self.team == "enemy":
+                                diff.x *= -1
                         else:
                             diff = self.pos - unit.pos
                             if diff.length() > 0:
@@ -1437,10 +1489,10 @@ class FlyingUnit(Unit):
         self.height = 50 # Flying height
         self.shadow_offset = 10
         
-    def move_towards_target(self, dt):
+    def calculate_movement(self, dt):
         """Override to fly directly without river pathfinding"""
         if not self.target:
-            return
+            return pygame.math.Vector2(0, 0), []
             
         target_pos = self.target.pos
         
@@ -1463,13 +1515,10 @@ class FlyingUnit(Unit):
                         separation += diff / dist # Weighted by distance
         
 
-
         if separation.length() > 0:
             direction += separation * 1.5 # Weight separation
             if direction.length() > 0:
                 direction = direction.normalize()
         
-        self.pos += direction * self.speed * dt
-        self.rect.center = self.pos
-        self.is_moving = True
+        return direction * self.speed * dt, []
 
